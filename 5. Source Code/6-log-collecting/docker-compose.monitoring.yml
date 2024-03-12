@@ -1,0 +1,42 @@
+version: "3.8"
+services:
+  visualizer:
+    image: dockersamples/visualizer:stable
+    deploy:
+      placement:
+        constraints:
+          - "node.role==manager"
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  fluentbit:
+    image: martinjoo/posts-fluentbit:${IMAGE_TAG}
+    deploy:
+      mode: global
+    ports:
+      - "24224:24224"
+    environment:
+      - LOKI_URL=http://loki:3100/loki/api/v1/push
+
+  loki:
+    image: martinjoo/posts-loki:${IMAGE_TAG}
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.db==true"
+    volumes:
+      - loki-data:/loki
+
+  grafana:
+    image: grafana/grafana:9.5.6
+    deploy:
+      placement:
+        constraints:
+          - "node.labels.db!=true"
+    ports:
+      - "3030:3000"
+
+volumes:
+  loki-data:

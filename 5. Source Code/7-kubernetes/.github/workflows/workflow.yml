@@ -1,0 +1,121 @@
+name: Tests
+
+on:
+  push:
+    branches: [ "main" ]
+
+env:
+  IMAGE_TAG: ${{ github.sha }}
+  API_IMAGE: martinjoo/posts-api:${{ github.sha }}
+  SCHEDULER_IMAGE: martinjoo/posts-scheduler:${{ github.sha }}
+  WORKER_IMAGE: martinjoo/posts-worker:${{ github.sha }}
+  NGINX_IMAGE: martinjoo/posts-nginx:${{ github.sha }}
+  FRONTEND_IMAGE: martinjoo/posts-frontend:${{ github.sha }}
+  HEALTH_CHECK_IMAGE: martinjoo/posts-health-check:${{ github.sha }}
+
+jobs:
+  build-backend-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build images
+        run: |
+          docker build -t $API_IMAGE --target=api --build-arg user=martin --build-arg uid=1000 -f ./api/Dockerfile .
+          docker build -t $SCHEDULER_IMAGE --target=scheduler --build-arg user=martin --build-arg uid=1000 -f ./api/Dockerfile .
+          docker build -t $WORKER_IMAGE --target=worker --build-arg user=martin --build-arg uid=1000 -f ./api/Dockerfile .
+          docker build -t $HEALTH_CHECK_IMAGE --target=health-check --build-arg user=martin --build-arg uid=1000 -f ./api/Dockerfile .
+      - name: Push images
+        run: |
+          docker push $API_IMAGE
+          docker push $SCHEDULER_IMAGE
+          docker push $WORKER_IMAGE
+          docker push $HEALTH_CHECK_IMAGE
+
+  build-nginx:
+    #needs: [ analyze, test ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build nginx image
+        run: |
+          docker build -t $NGINX_IMAGE -f ./Dockerfile.nginx .
+          docker push $NGINX_IMAGE
+
+  build-frontend:
+    #needs: [ analyze, test ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build frontend image
+        run: |
+          docker build -t $FRONTEND_IMAGE --target=prod -f ./frontend/Dockerfile .
+          docker push $FRONTEND_IMAGE
+
+  deploy-prod:
+    runs-on: ubuntu-latest
+    needs: [ "build-frontend", "build-nginx", "build-backend-images" ]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install doctl
+        run: |
+          wget https://github.com/digitalocean/doctl/releases/download/v1.94.0/doctl-1.94.0-linux-amd64.tar.gz
+          tar xf ./doctl-1.94.0-linux-amd64.tar.gz
+          mv ./doctl /usr/local/bin
+          doctl version
+          doctl auth init --access-token ${{ secrets.DOCTL_TOKEN }}
+          doctl k8s cluster kubeconfig save ${{ secrets.DO_CLUSTER_ID }}
+      - name: Install kubectl
+        run: |
+          curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+          curl -LO "https://dl.k8s.io/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+          echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+          chmod +x kubectl
+          mv ./kubectl /usr/local/bin
+          kubectl version --output=yaml
+      - name: Prepare secrets
+        run: |
+          cp .env.prod.template .env
+
+          sed -i "/IMAGE_TAG/c\IMAGE_TAG=$IMAGE_TAG" .env
+
+          sed -i "/DATABASE_URL/c\DATABASE_URL=${{ secrets.DATABASE_URL }}" .env
+          sed -i "/REDIS_URL/c\REDIS_URL=${{ secrets.REDIS_URL }}" .env
+
+          sed -i "/AWS_ACCESS_KEY_ID/c\AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" .env
+          sed -i "/AWS_SECRET_ACCESS_KEY/c\AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" .env
+
+          sed -i "/ROLLBAR_TOKEN/c\ROLLBAR_TOKEN=${{ secrets.ROLLBAR_TOKEN }}" .env
+
+          sed -i "/APP_KEY/c\APP_KEY=${{ secrets.APP_KEY }}" .env
+
+          export $(cat .env)
+
+          envsubst < infra/k8s/common/app-secret.yml > tmp_secret
+          mv tmp_secret infra/k8s/common/app-secret.yml
+
+          envsubst < infra/k8s/common/app-config.yml > tmp_config
+          mv tmp_config infra/k8s/common/app-config.yml
+      - name: Prepare deployment files
+        run: |
+          for subdir in "infra/k8s"/*; do
+            for file in "$subdir"/*.yml; do
+              envsubst < $file > tmp
+              mv tmp $file
+            done
+          done
+      - name: Update cluster
+        run: |
+          kubectl delete -f infra/k8s/migrate
+          kubectl apply -R -f infra/k8s

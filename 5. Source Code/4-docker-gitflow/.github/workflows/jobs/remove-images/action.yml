@@ -1,0 +1,22 @@
+name: 'Remove images'
+description: 'Remove images from DockerHub'
+inputs:
+  dockerhub-username:
+    description: 'DockerHub username'
+    required: true
+  dockerhub-password:
+    description: 'DockerHub password'
+    required: true
+  image-tag:
+    description: 'Tag of the images to remove'
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    - run: |
+        ./deployment/bin/remove-image.sh martinjoo/posts-api ${{ inputs.image-tag }} ${{ inputs.dockerhub-username }} ${{ inputs.dockerhub-password }}
+        ./deployment/bin/remove-image.sh martinjoo/posts-mysql ${{ inputs.image-tag }} ${{ inputs.dockerhub-username }} ${{ inputs.dockerhub-password }}
+        ./deployment/bin/remove-image.sh martinjoo/posts-worker ${{ inputs.image-tag }} ${{ inputs.dockerhub-username }} ${{ inputs.dockerhub-password }}
+        ./deployment/bin/remove-image.sh martinjoo/posts-scheduler ${{ inputs.image-tag }} ${{ inputs.dockerhub-username }} ${{ inputs.dockerhub-password }}
+      shell: bash

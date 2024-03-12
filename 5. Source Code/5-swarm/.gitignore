@@ -1,0 +1,8 @@
+.DS_Store
+.idea
+redisdata
+mysqldata
+.env
+manager
+worker1
+worker2

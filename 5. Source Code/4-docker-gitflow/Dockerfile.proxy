@@ -1,0 +1,6 @@
+FROM nginx:1.25.1
+
+COPY ./deployment/config/proxy.conf /etc/nginx/nginx.conf
+COPY ./api/wait-for-it.sh /usr/wait-for-it.sh
+
+EXPOSE 80

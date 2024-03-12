@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scheduler
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: scheduler
+              image: martinjoo/posts-scheduler:$IMAGE_TAG
+              imagePullPolicy: Always
+              envFrom:
+                - configMapRef:
+                    name: posts
+                - secretRef:
+                    name: posts
+          restartPolicy: OnFailure

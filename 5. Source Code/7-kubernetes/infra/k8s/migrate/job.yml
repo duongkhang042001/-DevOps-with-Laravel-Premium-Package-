@@ -1,0 +1,20 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: migrate
+          image: martinjoo/posts-api:$IMAGE_TAG
+          command: ["sh", "-c", "php artisan migrate --force"]
+          envFrom:
+            - configMapRef:
+                name: posts
+            - secretRef:
+                name: posts
+
+
